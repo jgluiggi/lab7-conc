@@ -12,8 +12,9 @@ public class Worker implements Runnable {
     private final Map<String, Integer> estoque;
     private final ReentrantReadWriteLock estoqueLock;
     private final AtomicInteger valorTotalVendas;
+    private final Map<String, AtomicInteger> produtosVendidos;
 
-    public Worker(AtomicInteger valorTotalVendas, ReentrantReadWriteLock estoqueLock, int workerId, BlockingQueue<Pedido> filaDePedidos, AtomicInteger pedidosProcessados, AtomicInteger pedidosRejeitados, BlockingQueue<Pedido> filaDePedidosPendentes, Map<String, Integer> estoque){
+    public Worker(AtomicInteger valorTotalVendas, ReentrantReadWriteLock estoqueLock, int workerId, BlockingQueue<Pedido> filaDePedidos, AtomicInteger pedidosProcessados, AtomicInteger pedidosRejeitados, BlockingQueue<Pedido> filaDePedidosPendentes, Map<String, Integer> estoque, Map<String, AtomicInteger> produtosVendidos){
         this.workerId = workerId;
         this.pedidosProcessados = pedidosProcessados;
         this.filaDePedidos = filaDePedidos;
@@ -22,6 +23,7 @@ public class Worker implements Runnable {
         this.estoque = estoque;
         this.estoqueLock = estoqueLock;
         this.valorTotalVendas = valorTotalVendas;
+        this.produtosVendidos = produtosVendidos; 
     }
 
     @Override
@@ -37,7 +39,7 @@ public class Worker implements Runnable {
                     System.out.println("Pedido ID: " + pedido.getId() + " do Cliente " + pedido.getClienteId() + " processado pelo Worker " + workerId + ".");
                 } else {
                     pedidosRejeitados.incrementAndGet();
-                    filaDePedidosPendentes.put(pedido); // Move o pedido para a fila de espera
+                    filaDePedidosPendentes.put(pedido);
                     System.out.println("Pedido ID: " + pedido.getId() + " do Cliente " + pedido.getClienteId() + " movido para fila de espera.");
                 }
 
@@ -48,11 +50,9 @@ public class Worker implements Runnable {
         }
     }
 
-    // Método que processa um pedido
     private boolean processarPedido(Pedido pedido) {
         estoqueLock.readLock().lock();
         try {
-            // Verifica se há produtos disponíveis no estoque
             for (Map.Entry<String, Integer> item : pedido.getProdutos().entrySet()) {
                 if (estoque.getOrDefault(item.getKey(), 0) < item.getValue()) {
                     System.out.println("Pedido ID: " + pedido.getId() + " movido para fila de espera por estoque vazio.");
@@ -62,25 +62,25 @@ public class Worker implements Runnable {
         } finally {
             estoqueLock.readLock().unlock();
         }
-
-        // Desconta os produtos do estoque
+    
         estoqueLock.writeLock().lock();
         try {
             for (Map.Entry<String, Integer> item : pedido.getProdutos().entrySet()) {
                 estoque.put(item.getKey(), estoque.get(item.getKey()) - item.getValue());
+    
+                // Atualiza o contador de produtos vendidos
+                produtosVendidos.get(item.getKey()).addAndGet(item.getValue()); // Adicione esta linha
             }
             valorTotalVendas.addAndGet(calcularValorTotal(pedido));
             System.out.println("Pedido ID: " + pedido.getId() + " processado com sucesso.");
         } finally {
             estoqueLock.writeLock().unlock();
         }
-
+    
         return true;
     }
 
-    // Calcula o valor total do pedido
     private int calcularValorTotal(Pedido pedido) {
-        // Simula preços para os produtos
         int total = 0;
         total += pedido.getProdutos().getOrDefault("ProdutoA", 0) * 10;
         total += pedido.getProdutos().getOrDefault("ProdutoB", 0) * 20;
