@@ -32,12 +32,12 @@ public class SistemaECommerce {
 
         // Iniciando threads de clientes para fazer pedidos
         for (int i = 0; i < 5; i++) { // Exemplo com 5 clientes
-            executor.submit(new Cliente(i + 1));
+            executor.submit(new Cliente(i + 1, pedidoIdGenerator, filaDePedidos));
         }
 
         // Iniciando threads de workers para processar os pedidos
         for (int i = 0; i < 3; i++) { // Exemplo com 3 workers
-            executor.submit(new Worker(i + 1));
+            executor.submit(new Worker(valorTotalVendas, estoqueLock, i + 1, filaDePedidos, pedidosProcessados, pedidosRejeitados, filaDePedidosPendentes, estoque));
         }
 
         // Inicia uma thread para reabastecer o estoque periodicamente
@@ -71,6 +71,9 @@ public class SistemaECommerce {
         estoque.put("ProdutoA", 100);
         estoque.put("ProdutoB", 150);
         estoque.put("ProdutoC", 200);
+        System.out.println("Estoque inicializado com " + estoque.get("ProdutoA") + " itens de ProdutoA, " 
+        + estoque.get("ProdutoB") + " itens de ProdutoB, e " 
+        + estoque.get("ProdutoC") + " itens de ProdutoC.");
     }
 
     // Simula o reabastecimento do estoque
@@ -81,6 +84,7 @@ public class SistemaECommerce {
             estoque.put("ProdutoA", estoque.get("ProdutoA") + 50);
             estoque.put("ProdutoB", estoque.get("ProdutoB") + 50);
             estoque.put("ProdutoC", estoque.get("ProdutoC") + 50);
+            System.out.println("Sistema reabastecido com 50 itens de ProdutoA, 50 itens de ProdutoB, 50 itens de ProdutoC.");
         } finally {
             estoqueLock.writeLock().unlock();
         }
@@ -94,6 +98,7 @@ public class SistemaECommerce {
         for (Pedido pedido : reprocessar) {
             try {
                 filaDePedidos.put(pedido); // Coloca os pedidos de volta na fila principal para processamento
+                System.out.println("Pedido " + pedido.getId() + " do Cliente " + pedido.getClienteId() + " foi reprocessado.");
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -103,133 +108,10 @@ public class SistemaECommerce {
     // Método para exibir o relatório de vendas
     private static void exibirRelatorio() {
         System.out.println("--------------------");
-        System.out.println("Relatório de Vendas:");
+        System.out.println("Relatório de Vendas: ");
         System.out.println("Pedidos Processados: " + pedidosProcessados.get());
         System.out.println("Valor Total das Vendas: " + valorTotalVendas.get());
         System.out.println("Pedidos Rejeitados: " + pedidosRejeitados.get());
         System.out.println("--------------------");
-    }
-
-    // Classe representando um Pedido
-    static class Pedido {
-        private final int id;
-        private final Map<String, Integer> produtos;
-
-        public Pedido(int id, Map<String, Integer> produtos) {
-            this.id = id;
-            this.produtos = produtos;
-        }
-
-        public int getId() {
-            return id;
-        }
-
-        public Map<String, Integer> getProdutos() {
-            return produtos;
-        }
-    }
-
-    // Cliente que faz pedidos
-    static class Cliente implements Runnable {
-        private final int clienteId;
-
-        public Cliente(int clienteId) {
-            this.clienteId = clienteId;
-        }
-
-        @Override
-        public void run() {
-            Random random = new Random();
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    int pedidoId = pedidoIdGenerator.incrementAndGet();
-                    System.out.println("Cliente " + clienteId + " fazendo pedido ID: " + pedidoId);
-
-                    // Gera produtos aleatórios para o pedido
-                    Map<String, Integer> produtos = new HashMap<>();
-                    produtos.put("ProdutoA", random.nextInt(5) + 1);
-                    produtos.put("ProdutoB", random.nextInt(3) + 1);
-                    produtos.put("ProdutoC", random.nextInt(4) + 1);
-
-                    filaDePedidos.put(new Pedido(pedidoId, produtos));
-
-                    // Espera randômica entre pedidos
-                    Thread.sleep(random.nextInt(2000) + 1000); // De 1 a 3 segundos
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-    }
-
-    // Worker que processa pedidos
-    static class Worker implements Runnable {
-        private final int workerId;
-
-        public Worker(int workerId) {
-            this.workerId = workerId;
-        }
-
-        @Override
-        public void run() {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    Pedido pedido = filaDePedidos.take();
-                    System.out.println("Worker " + workerId + " processando pedido ID: " + pedido.getId());
-
-                    if (processarPedido(pedido)) {
-                        pedidosProcessados.incrementAndGet();
-                    } else {
-                        pedidosRejeitados.incrementAndGet();
-                        filaDePedidosPendentes.put(pedido); // Move o pedido para a fila de espera
-                    }
-
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }
-
-        // Método que processa um pedido
-        private boolean processarPedido(Pedido pedido) {
-            estoqueLock.readLock().lock();
-            try {
-                // Verifica se há produtos disponíveis no estoque
-                for (Map.Entry<String, Integer> item : pedido.getProdutos().entrySet()) {
-                    if (estoque.getOrDefault(item.getKey(), 0) < item.getValue()) {
-                        System.out.println("Pedido ID: " + pedido.getId() + " movido para fila de espera por estoque vazio.");
-                        return false;
-                    }
-                }
-            } finally {
-                estoqueLock.readLock().unlock();
-            }
-
-            // Desconta os produtos do estoque
-            estoqueLock.writeLock().lock();
-            try {
-                for (Map.Entry<String, Integer> item : pedido.getProdutos().entrySet()) {
-                    estoque.put(item.getKey(), estoque.get(item.getKey()) - item.getValue());
-                }
-                valorTotalVendas.addAndGet(calcularValorTotal(pedido));
-                System.out.println("Pedido ID: " + pedido.getId() + " processado com sucesso.");
-            } finally {
-                estoqueLock.writeLock().unlock();
-            }
-
-            return true;
-        }
-
-        // Calcula o valor total do pedido
-        private int calcularValorTotal(Pedido pedido) {
-            // Simula preços para os produtos
-            int total = 0;
-            total += pedido.getProdutos().getOrDefault("ProdutoA", 0) * 10;
-            total += pedido.getProdutos().getOrDefault("ProdutoB", 0) * 20;
-            total += pedido.getProdutos().getOrDefault("ProdutoC", 0) * 15;
-            return total;
-        }
     }
 }

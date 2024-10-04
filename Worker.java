@@ -29,13 +29,16 @@ public class Worker implements Runnable {
         while (!Thread.currentThread().isInterrupted()) {
             try {
                 Pedido pedido = filaDePedidos.take();
-                System.out.println("Worker " + workerId + " processando pedido ID: " + pedido.getId());
+                String mensagem = "Pedido " + pedido.getId() + " do Cliente " + pedido.getClienteId();
+                System.out.println("Worker " + workerId + " processando " + mensagem);
 
                 if (processarPedido(pedido)) {
                     pedidosProcessados.incrementAndGet();
+                    System.out.println("Pedido ID: " + pedido.getId() + " do Cliente " + pedido.getClienteId() + " processado pelo Worker " + workerId + ".");
                 } else {
                     pedidosRejeitados.incrementAndGet();
                     filaDePedidosPendentes.put(pedido); // Move o pedido para a fila de espera
+                    System.out.println("Pedido ID: " + pedido.getId() + " do Cliente " + pedido.getClienteId() + " movido para fila de espera.");
                 }
 
             } catch (InterruptedException e) {
